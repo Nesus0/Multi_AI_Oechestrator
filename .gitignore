@@ -1,0 +1,40 @@
+# Secrets — never commit real credentials
+secrets.env
+.env
+.env.*
+!.env.example
+!secrets.example.env
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local runtime state and logs
+.state/
+state.json
+runs/
+*.jsonl
+*.log
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Archives and generated packages
+*.zip
+*.tar
+*.tar.gz
