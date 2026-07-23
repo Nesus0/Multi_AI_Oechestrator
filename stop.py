@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stop optional background services started by launch.py."""
+"""Stop nesus_ai background services safely."""
 from __future__ import annotations
 
 import argparse
@@ -15,31 +15,26 @@ STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
 SERVICE_FILE = STATE_DIR / "services.json"
 
 
-def process_alive(pid: int) -> bool:
+def alive(pid: int) -> bool:
     if pid <= 1:
         return False
     try:
         os.kill(pid, 0)
+        return True
     except ProcessLookupError:
         return False
     except PermissionError:
         return True
-    return True
 
 
 def command_line(pid: int) -> str:
-    path = Path(f"/proc/{pid}/cmdline")
-    if not path.exists():
-        return ""
     try:
-        return path.read_bytes().replace(b"\0", b" ").decode("utf-8", errors="replace").strip()
+        return Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")
     except OSError:
         return ""
 
 
 def read_state() -> dict[str, object]:
-    if not SERVICE_FILE.exists():
-        return {}
     try:
         value = json.loads(SERVICE_FILE.read_text(encoding="utf-8"))
         return value if isinstance(value, dict) else {}
@@ -47,77 +42,74 @@ def read_state() -> dict[str, object]:
         return {}
 
 
-def save_state(data: dict[str, object]) -> None:
-    if not data:
+def save_state(value: dict[str, object]) -> None:
+    if not value:
         SERVICE_FILE.unlink(missing_ok=True)
         return
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
     tmp = SERVICE_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.write_text(json.dumps(value, indent=2), encoding="utf-8")
     os.replace(tmp, SERVICE_FILE)
 
 
-def stop_process(pid: int, expected_command: str, timeout: float, force: bool) -> bool:
-    if not process_alive(pid):
+def stop_one(name: str, service: dict[str, object], timeout: float, force: bool) -> bool:
+    pid = int(service.get("pid", 0) or 0)
+    if not alive(pid):
+        print(f"{name}: already stopped")
         return True
+    expected = " ".join(str(x) for x in service.get("command", []))
     observed = command_line(pid)
-    if observed and expected_command:
-        expected_binary = Path(expected_command.split()[0]).name
-        if expected_binary not in observed and not force:
-            raise RuntimeError(
-                f"PID {pid} does not look like the registered service ({observed!r}). Use --force to override."
-            )
+    if observed and expected:
+        binary = Path(expected.split()[0]).name
+        if binary not in observed and not force:
+            raise RuntimeError(f"PID {pid} does not match {name}; use --force")
     try:
         os.killpg(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return True
-    except PermissionError as exc:
-        raise RuntimeError(f"Permission denied while stopping PID {pid}") from exc
     except OSError:
         os.kill(pid, signal.SIGTERM)
-
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if not process_alive(pid):
+        if not alive(pid):
+            print(f"{name}: stopped (pid={pid})")
             return True
         time.sleep(0.25)
-
     try:
         os.killpg(pid, signal.SIGKILL)
-    except ProcessLookupError:
-        return True
     except OSError:
         try:
             os.kill(pid, signal.SIGKILL)
         except ProcessLookupError:
-            return True
-    return not process_alive(pid)
+            pass
+    stopped = not alive(pid)
+    print(f"{name}: {'stopped' if stopped else 'unable to confirm stop'} (pid={pid})")
+    return stopped
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Stop optional nesus_ai background services.")
+    parser = argparse.ArgumentParser(description="Stop nesus_ai manager and local fallback")
     parser.add_argument("--timeout", type=float, default=10.0)
-    parser.add_argument("--force", action="store_true", help="Ignore process identity mismatch.")
+    parser.add_argument("--force", action="store_true")
+    parser.add_argument("--manager-only", action="store_true")
+    parser.add_argument("--local-only", action="store_true")
     args = parser.parse_args()
-
     state = read_state()
-    service = state.get("local_llm")
-    if not isinstance(service, dict):
-        print("No local LLM service is registered.")
+    if not state:
+        print("No nesus_ai background service is registered.")
         return 0
-
-    pid = int(service.get("pid", 0) or 0)
-    command = service.get("command", [])
-    expected = " ".join(str(part) for part in command) if isinstance(command, list) else str(command)
-    stopped = stop_process(pid, expected, max(0.5, args.timeout), args.force)
-    if not stopped:
-        print(f"Unable to confirm shutdown of PID {pid}.", file=sys.stderr)
-        return 1
-
-    state.pop("local_llm", None)
+    names = ["manager", "local_llm"]
+    if args.manager_only:
+        names = ["manager"]
+    elif args.local_only:
+        names = ["local_llm"]
+    failed = False
+    for name in names:
+        service = state.get(name)
+        if isinstance(service, dict):
+            if stop_one(name, service, max(0.5, args.timeout), args.force):
+                state.pop(name, None)
+            else:
+                failed = True
     save_state(state)
-    print(f"Local LLM stopped (pid={pid}).")
-    return 0
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
