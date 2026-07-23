@@ -1,9 +1,11 @@
-# Secrets — never commit real credentials
+# Secrets and local machine configuration — never commit real values
 secrets.env
+local.env
 .env
 .env.*
 !.env.example
 !secrets.example.env
+!local.example.env
 *.pem
 *.key
 
@@ -24,6 +26,7 @@ env/
 # Local runtime state and logs
 .state/
 state.json
+services.json
 runs/
 *.jsonl
 *.log
