@@ -1,0 +1,198 @@
+# nesus-ai v0.3.1-local — local-only multi-provider supervisor
+# Real keys belong in ~/.config/nesus-ai/secrets.env
+
+[general]
+provider_order = ["codex", "claude", "gemini"]
+account_strategy = "least_recently_used" # least_recently_used | priority
+timeout_seconds = 7200
+stall_timeout_seconds = 900
+server_retries = 1
+retry_base_seconds = 0.75
+retry_cap_seconds = 12.0
+auth_cooldown_seconds = 1800
+rate_limit_cooldown_seconds = 900
+server_cooldown_seconds = 120
+model_unavailable_cooldown_seconds = 600
+max_output_tail_chars = 16000
+max_prompt_chars = 28000
+max_inline_task_chars = 10000
+max_handoff_chars = 5000
+max_git_summary_chars = 6000
+max_total_attempts = 14
+max_models_per_provider = 4
+payload_compact_retry = true
+verification = false
+
+# Strictly local execution: agents may use local Git, but cannot publish.
+local_only = true
+block_git_push = true
+block_github_cli = true
+secrets_file = "~/.config/nesus-ai/secrets.env"
+
+[providers.codex]
+enabled = true
+priority = 100
+capabilities = ["code", "debug", "tests", "refactor", "review", "architecture", "security", "general"]
+command = [
+  "codex", "exec", "--json", "--ephemeral", "--skip-git-repo-check",
+  "--dangerously-bypass-approvals-and-sandbox",
+  "--model", "{model}", "-c", "model_reasoning_effort=\"{thinking}\"", "{prompt}"
+]
+
+# Cheap/fast first for narrow work.
+[[providers.codex.models]]
+name = "luna"
+model = "gpt-5.6-luna"
+thinking = "low"
+priority = 120
+cost_rank = 1
+min_complexity = 0
+max_complexity = 45
+capabilities = ["code", "tests", "refactor", "documentation", "general"]
+max_turns = 5
+
+[[providers.codex.models]]
+name = "terra"
+model = "gpt-5.6-terra"
+thinking = "medium"
+priority = 108
+cost_rank = 2
+min_complexity = 25
+max_complexity = 75
+capabilities = ["code", "debug", "tests", "refactor", "review", "general"]
+max_turns = 7
+
+[[providers.codex.models]]
+name = "sol"
+model = "gpt-5.6-sol"
+thinking = "high"
+priority = 100
+cost_rank = 4
+min_complexity = 45
+max_complexity = 100
+capabilities = ["code", "debug", "tests", "refactor", "review", "architecture", "security", "general"]
+max_turns = 9
+
+[[providers.codex.accounts]]
+name = "aiprimetech-codex-1"
+priority = 100
+env_from = { OPENAI_API_KEY = "AIPRIMETECH_CODEX_KEY_1" }
+
+[[providers.codex.accounts]]
+name = "aiprimetech-codex-2"
+priority = 100
+env_from = { OPENAI_API_KEY = "AIPRIMETECH_CODEX_KEY_2" }
+
+[providers.claude]
+enabled = true
+priority = 95
+capabilities = ["architecture", "debug", "review", "security", "code", "documentation", "large-context", "analysis", "general"]
+command = [
+  "claude", "--dangerously-skip-permissions",
+  "--model", "{model}", "--effort", "{thinking}", "--max-turns", "{max_turns}",
+  "-p", "{prompt}", "--output-format", "stream-json", "--verbose", "--no-session-persistence"
+]
+env = { ANTHROPIC_BASE_URL = "https://aiprimetech.io" }
+
+[[providers.claude.models]]
+name = "haiku"
+model = "claude-haiku-4-5"
+thinking = "low"
+priority = 125
+cost_rank = 1
+min_complexity = 0
+max_complexity = 28
+capabilities = ["documentation", "review", "general"]
+max_turns = 4
+
+[[providers.claude.models]]
+name = "sonnet"
+model = "claude-sonnet-4-6"
+thinking = "high"
+priority = 112
+cost_rank = 2
+min_complexity = 18
+max_complexity = 72
+capabilities = ["code", "debug", "review", "architecture", "documentation", "analysis", "general"]
+max_turns = 7
+
+[[providers.claude.models]]
+name = "opus"
+model = "claude-opus-4-8"
+thinking = "xhigh"
+priority = 100
+cost_rank = 5
+min_complexity = 58
+max_complexity = 100
+capabilities = ["code", "debug", "review", "architecture", "security", "analysis", "general"]
+max_turns = 9
+
+[[providers.claude.models]]
+name = "fable"
+model = "claude-fable-5"
+thinking = "high"
+priority = 105
+cost_rank = 5
+min_complexity = 48
+max_complexity = 100
+long_context = true
+capabilities = ["large-context", "architecture", "documentation", "analysis", "review", "code", "general"]
+max_turns = 8
+
+[[providers.claude.accounts]]
+name = "aiprimetech-claude-1"
+priority = 100
+env_from = { ANTHROPIC_AUTH_TOKEN = "AIPRIMETECH_CLAUDE_KEY_1", ANTHROPIC_API_KEY = "AIPRIMETECH_CLAUDE_KEY_1" }
+
+[[providers.claude.accounts]]
+name = "aiprimetech-claude-2"
+priority = 100
+env_from = { ANTHROPIC_AUTH_TOKEN = "AIPRIMETECH_CLAUDE_KEY_2", ANTHROPIC_API_KEY = "AIPRIMETECH_CLAUDE_KEY_2" }
+
+[providers.gemini]
+enabled = true
+priority = 85
+capabilities = ["large-context", "documentation", "analysis", "review", "code", "general"]
+command = [
+  "gemini", "--skip-trust", "--approval-mode=yolo", "--model", "{model}",
+  "--output-format", "stream-json", "--prompt", "{prompt}"
+]
+
+[[providers.gemini.models]]
+name = "flash"
+model = "flash"
+thinking = "default"
+priority = 120
+cost_rank = 1
+min_complexity = 0
+max_complexity = 58
+long_context = true
+capabilities = ["documentation", "analysis", "review", "code", "large-context", "general"]
+max_turns = 6
+
+[[providers.gemini.models]]
+name = "pro"
+model = "pro"
+thinking = "high"
+priority = 100
+cost_rank = 3
+min_complexity = 38
+max_complexity = 100
+long_context = true
+capabilities = ["large-context", "documentation", "analysis", "review", "code", "architecture", "general"]
+max_turns = 8
+
+[[providers.gemini.accounts]]
+name = "google-gemini-1"
+priority = 100
+env_from = { GEMINI_API_KEY = "GEMINI_API_KEY_1" }
+
+[[providers.gemini.accounts]]
+name = "google-gemini-2"
+priority = 100
+env_from = { GEMINI_API_KEY = "GEMINI_API_KEY_2" }
+
+[[providers.gemini.accounts]]
+name = "google-gemini-3"
+priority = 100
+env_from = { GEMINI_API_KEY = "GEMINI_API_KEY_3" }
