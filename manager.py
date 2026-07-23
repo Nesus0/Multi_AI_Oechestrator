@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Ultra-light 24/7 health manager for nesus_ai.
-
-No third-party dependency. Normal operation is two short health checks followed
-by sleep. AI escalation is last-resort only and never runs concurrently.
-"""
+"""Ultra-light 24/7 health manager for nesus_ai (stdlib only)."""
 from __future__ import annotations
 
 import argparse
@@ -47,30 +43,26 @@ def as_bool(value: str | None, default: bool = False) -> bool:
     return default if value is None else value.lower() in {"1", "true", "yes", "on", "oui"}
 
 
-def as_int(cfg: dict[str, str], key: str, default: int, minimum: int, maximum: int) -> int:
+def as_int(cfg: dict[str, str], key: str, default: int, low: int, high: int) -> int:
     try:
-        value = int(cfg.get(key, str(default)))
+        return max(low, min(high, int(cfg.get(key, str(default)))))
     except ValueError as exc:
         raise ValueError(f"{key} must be an integer") from exc
-    return max(minimum, min(maximum, value))
 
 
 def log(event: str, **fields: object) -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     if LOG_FILE.exists() and LOG_FILE.stat().st_size > MAX_LOG_BYTES:
         LOG_FILE.replace(LOG_FILE.with_suffix(".jsonl.1"))
-    payload = {"time": datetime.now(timezone.utc).isoformat(), "event": event, **fields}
     with LOG_FILE.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        fh.write(json.dumps({"time": datetime.now(timezone.utc).isoformat(), "event": event, **fields}, ensure_ascii=False) + "\n")
 
 
 def run(command: str, timeout: int) -> tuple[bool, str]:
     if not command.strip():
         return False, "command not configured"
-    proc = subprocess.run(
-        shlex.split(command), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT, text=True, timeout=timeout, check=False,
-    )
+    proc = subprocess.run(shlex.split(command), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, text=True, timeout=timeout, check=False)
     return proc.returncode == 0, proc.stdout[-1200:].strip()
 
 
@@ -92,23 +84,35 @@ def load_1m() -> float:
 
 
 def resources_allow_ai(cfg: dict[str, str]) -> bool:
-    min_mem = as_int(cfg, "NESUS_MANAGER_MIN_AI_MEMORY_MIB", 350, 128, 8192)
-    max_load = float(cfg.get("NESUS_MANAGER_MAX_AI_LOAD_1M", "0.80"))
-    return memory_mib() >= min_mem and load_1m() <= max_load
+    return (memory_mib() >= as_int(cfg, "NESUS_MANAGER_MIN_AI_MEMORY_MIB", 350, 128, 8192)
+            and load_1m() <= float(cfg.get("NESUS_MANAGER_MAX_AI_LOAD_1M", "0.80")))
 
 
 def service_cfg(cfg: dict[str, str], prefix: str) -> dict[str, str]:
-    return {
-        "name": cfg.get(f"NESUS_{prefix}_NAME", prefix),
-        "health": cfg.get(f"NESUS_{prefix}_HEALTH_CMD", ""),
-        "recover": cfg.get(f"NESUS_{prefix}_RECOVERY_CMD", ""),
-        "project": cfg.get(f"NESUS_{prefix}_PROJECT_DIR", ""),
-    }
+    return {"name": cfg.get(f"NESUS_{prefix}_NAME", prefix),
+            "health": cfg.get(f"NESUS_{prefix}_HEALTH_CMD", ""),
+            "recover": cfg.get(f"NESUS_{prefix}_RECOVERY_CMD", ""),
+            "project": cfg.get(f"NESUS_{prefix}_PROJECT_DIR", "")}
 
 
 def orchestrator_busy() -> bool:
+    """Return True only for a currently held flock; stale lock files are harmless."""
     lock_dir = STATE_DIR / "locks"
-    return lock_dir.exists() and any(lock_dir.glob("*.lock"))
+    if not lock_dir.exists():
+        return False
+    for path in lock_dir.glob("*.lock"):
+        try:
+            fh = path.open("a+")
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(fh, fcntl.LOCK_UN)
+            except BlockingIOError:
+                fh.close()
+                return True
+            fh.close()
+        except OSError:
+            continue
+    return False
 
 
 def escalate(service: dict[str, str], cfg: dict[str, str]) -> bool:
@@ -117,17 +121,13 @@ def escalate(service: dict[str, str], cfg: dict[str, str]) -> bool:
     if not resources_allow_ai(cfg):
         log("ai_skipped_resources", service=service["name"], memory_mib=memory_mib(), load_1m=load_1m())
         return False
-    binary = cfg.get("NESUS_MANAGER_ORCHESTRATOR_BIN", "nesus_ai")
-    task = (
-        f"Read {INSTRUCTIONS} first. Restore only {service['name']} in {service['project']}. "
-        f"Use the configured health check as the success criterion. Make the smallest reversible repair."
-    )
+    task = (f"Read {INSTRUCTIONS} first. Restore only {service['name']} in {service['project']}. "
+            "Make the smallest reversible repair and verify the configured health check.")
     log("ai_escalation", service=service["name"])
-    proc = subprocess.run(
-        [binary, "run", "-C", service["project"], task], stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        timeout=as_int(cfg, "NESUS_MANAGER_AI_TIMEOUT", 900, 60, 7200), check=False,
-    )
+    proc = subprocess.run([cfg.get("NESUS_MANAGER_ORCHESTRATOR_BIN", "nesus_ai"), "run", "-C",
+                           service["project"], task], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL,
+                          timeout=as_int(cfg, "NESUS_MANAGER_AI_TIMEOUT", 900, 60, 7200), check=False)
     return proc.returncode == 0
 
 
@@ -166,7 +166,6 @@ def main() -> int:
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
-        print("manager already running", file=sys.stderr)
         return 0
     lock.write(str(os.getpid())); lock.flush()
     interval = as_int(cfg, "NESUS_MANAGER_INTERVAL", 60, 30, 3600)
@@ -175,8 +174,7 @@ def main() -> int:
     secondary = service_cfg(cfg, "SECONDARY_SERVICE")
     log("manager_started", pid=os.getpid(), instructions=str(INSTRUCTIONS))
     while True:
-        primary_ok = protect(primary, cfg, settle)
-        if primary_ok:
+        if protect(primary, cfg, settle):
             protect(secondary, cfg, settle)
         else:
             log("secondary_skipped", reason="priority service unhealthy")
