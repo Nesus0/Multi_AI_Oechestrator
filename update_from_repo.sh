@@ -40,7 +40,7 @@ echo "Fetching latest origin/main..."
 git fetch --prune origin main
 
 echo "Forcing local repository to origin/main..."
-git checkout -B main origin/main
+git checkout -f -B main origin/main
 git reset --hard origin/main
 git clean -fd
 
