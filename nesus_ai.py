@@ -1,11 +1,21 @@
 #!/usr/bin/env python3
-"""nesus_ai: tiny dependency-free multi-provider API router."""
+"""nesus_ai: tiny multi-provider API router."""
 from __future__ import annotations
-import argparse, json, os, sys, time, tomllib, urllib.error, urllib.request
+import argparse, json, os, sys, time, urllib.error, urllib.request
+try:
+    import tomllib
+except ModuleNotFoundError:
+    try:
+        import tomli as tomllib
+    except ModuleNotFoundError as exc:
+        raise SystemExit(
+            "nesus_ai requires Python 3.11+ or the tiny 'tomli' package. "
+            "Run: python3 -m pip install --user tomli"
+        ) from exc
 from pathlib import Path
 from typing import Any
 
-APP='nesus-ai'; VERSION='1.0.0'
+APP='nesus-ai'; VERSION='1.0.1'
 CONFIG_DIR=Path(os.environ.get('XDG_CONFIG_HOME', Path.home()/'.config'))/APP
 CONFIG_PATH=CONFIG_DIR/'config.toml'; SECRETS_PATH=CONFIG_DIR/'secrets.env'; INSTRUCTIONS_PATH=CONFIG_DIR/'instructions.md'
 DEFAULT_INSTRUCTIONS='''# nesus_ai Global Instructions\n\nYou are a lightweight orchestration agent.\n\n- Complete the user request with the fewest API calls possible.\n- Prefer correctness, small context, targeted edits, and reversible changes.\n- Never invent results or claim tests passed when they were not run.\n- If a provider fails, switch provider and continue within configured limits.\n- Never expose secrets.\n- Stop when the task is complete and return a compact result.\n'''
@@ -109,7 +119,7 @@ def run_task(task:str,provider:str|None=None)->int:
 
 def doctor(probe:bool=False)->int:
     cfg=load_config(); secrets={**load_env(SECRETS_PATH),**os.environ}; bad=0
-    print(f'nesus_ai {VERSION}\nconfig={CONFIG_PATH}\ninstructions={INSTRUCTIONS_PATH}')
+    print(f'nesus_ai {VERSION}\npython={sys.version.split()[0]}\nconfig={CONFIG_PATH}\ninstructions={INSTRUCTIONS_PATH}')
     for name,p in cfg.get('providers',{}).items():
         status='configured' if secrets.get(str(p.get('key_env',''))) or p.get('auth')=='none' else 'missing-key'
         print(f'{name}: {status} model={p.get("model")} url={p.get("base_url")}'); bad += status=='missing-key'
