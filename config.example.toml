@@ -1,14 +1,16 @@
 [general]
 provider_order = ["cerebras", "groq", "openrouter"]
 timeout_seconds = 90
-max_attempts = 6
+max_attempts = 8
+max_models_per_provider = 3
 max_prompt_chars = 24000
+models_cache_seconds = 600
 
 [providers.cerebras]
 enabled = true
 protocol = "openai"
 base_url = "https://api.cerebras.ai/v1"
-model = "gpt-oss-120b"
+model = "auto"
 auth = "bearer"
 key_env = "CEREBRAS_API_KEY"
 
@@ -16,7 +18,7 @@ key_env = "CEREBRAS_API_KEY"
 enabled = true
 protocol = "openai"
 base_url = "https://api.groq.com/openai/v1"
-model = "llama-3.3-70b-versatile"
+model = "auto"
 auth = "bearer"
 key_env = "GROQ_API_KEY"
 
@@ -24,10 +26,11 @@ key_env = "GROQ_API_KEY"
 enabled = true
 protocol = "openai"
 base_url = "https://openrouter.ai/api/v1"
-model = "openrouter/free"
+model = "auto"
 auth = "bearer"
 key_env = "OPENROUTER_API_KEY"
 headers = { X-OpenRouter-Title = "nesus_ai" }
 
+# Google is intentionally fixed to gemini-3.5-flash-lite.
 # Add Google or any OpenAI/Claude-compatible direct API or proxy with:
 # nesus_ai add-provider
